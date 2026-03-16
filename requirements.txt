@@ -1,0 +1,35 @@
+# Core Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Database
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+
+# HTTP Client
+httpx>=0.26.0
+
+# LLM & Agents
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+
+# Configuration
+python-dotenv>=1.0.0
+
+# Scheduling
+apscheduler>=3.10.0
+
+# Data Sources
+arxiv>=2.1.0
+feedparser>=6.0.0
+
+# Development Dependencies (install with: pip install -r requirements-dev.txt)
+# pytest>=7.4.0
+# pytest-asyncio>=0.23.0
+# pytest-cov>=4.1.0
+# black>=24.1.0
+# ruff>=0.1.0
+# mypy>=1.8.0

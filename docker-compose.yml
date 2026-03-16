@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # 后端服务
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: metis-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql+asyncpg://metis:metis@db:5432/metis
+      - DEBUG=false
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - db
+    networks:
+      - metis-network
+    restart: unless-stopped
+
+  # 前端服务
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: metis-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - metis-network
+    restart: unless-stopped
+
+  # PostgreSQL 数据库 (生产环境)
+  db:
+    image: postgres:15-alpine
+    container_name: metis-db
+    environment:
+      - POSTGRES_USER=metis
+      - POSTGRES_PASSWORD=metis
+      - POSTGRES_DB=metis
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - metis-network
+    restart: unless-stopped
+
+networks:
+  metis-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

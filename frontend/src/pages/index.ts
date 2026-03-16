@@ -1,0 +1,5 @@
+export { default as Dashboard } from './Dashboard'
+export { default as Contents } from './Contents'
+export { default as ContentDetail } from './ContentDetail'
+export { default as LearningRecords } from './LearningRecords'
+export { default as Settings } from './Settings'
