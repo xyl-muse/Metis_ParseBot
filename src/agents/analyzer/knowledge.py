@@ -8,7 +8,7 @@ from langchain_core.language_models import BaseChatModel
 from src.core.config import settings
 from src.core.logging import get_logger
 from src.core.exceptions import KnowledgeLinkError
-from src.agents.analyzer.prompts import KNOWLEDGE_LINK_PROMPT
+from src.agents.analyzer.prompts import get_knowledge_link_prompt
 
 logger = get_logger(__name__)
 
@@ -81,10 +81,11 @@ class KnowledgeAnalyzer:
             KnowledgeAnalysisResult 知识关联分析结果
         """
         try:
-            prompt = KNOWLEDGE_LINK_PROMPT.format(
+            # 使用智能选择的 prompt（自动检测语言）
+            prompt = get_knowledge_link_prompt(
                 title=title,
                 summary=summary,
-                key_points=json.dumps(key_points, ensure_ascii=False),
+                key_points=key_points,
             )
 
             response = await self.llm.ainvoke(prompt)

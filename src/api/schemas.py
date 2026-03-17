@@ -79,7 +79,7 @@ class ReviewResponse(BaseModel):
 
 class ReviewRequest(BaseModel):
     """预审请求模型"""
-    content_id: str
+    content_id: Optional[str] = None  # 可选，为空则处理所有待预审内容
 
 
 class ReviewListResponse(BaseResponse):
@@ -121,7 +121,7 @@ class AnalysisResponse(BaseModel):
 
 class AnalysisRequest(BaseModel):
     """分析请求模型"""
-    content_id: str
+    content_id: Optional[str] = None  # 可选，为空则处理所有待分析内容
 
 
 class AnalysisListResponse(BaseResponse):

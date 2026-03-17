@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     collect_interval_hours: int = Field(default=6, ge=1, le=24)
     max_items_per_run: int = Field(default=50, ge=1, le=200)
     collect_timeout_seconds: int = Field(default=30, ge=10)
-    content_age_limit_days: int = Field(default=3, ge=1, le=30)  # 内容时效性限制（天）
+    content_age_limit_days: int = Field(default=15, ge=1, le=30)  # 内容时效性限制（天）
 
     # arXiv 配置
     arxiv_categories: list[str] = Field(
@@ -60,6 +60,26 @@ class Settings(BaseSettings):
     # 新闻源配置
     news_sources: list[str] = Field(
         default=["hackernews", "reddit_ml", "reddit_security"]
+    )
+    
+    # 学术论文源配置
+    academic_sources: list[str] = Field(
+        default=["openreview", "semantic_scholar", "papers_with_code"]
+    )
+    
+    # 技术新闻源配置
+    tech_sources: list[str] = Field(
+        default=["github_trending", "huggingface"]
+    )
+    
+    # 安全新闻源配置
+    security_sources: list[str] = Field(
+        default=["freebuf", "aqniu"]
+    )
+    
+    # AI 公司博客配置
+    ai_blog_sources: list[str] = Field(
+        default=["openai", "anthropic", "google_ai"]
     )
 
     # ==================== 预审配置 ====================

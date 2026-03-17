@@ -1,4 +1,5 @@
 """预审智能体"""
+import asyncio
 from datetime import datetime
 from typing import Optional
 
@@ -14,6 +15,9 @@ from src.db.models import Content
 
 logger = get_logger(__name__)
 
+# API 请求间隔（秒），防止 429 限流
+API_REQUEST_DELAY = 2.0
+
 
 class ReviewerAgent(BaseAgent):
     """
@@ -22,10 +26,29 @@ class ReviewerAgent(BaseAgent):
     负责对采集的内容进行价值评分和筛选。
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, progress_dict: Optional[dict] = None, **kwargs):
         super().__init__(name="ReviewerAgent", **kwargs)
         self.scorer = Scorer(self.llm)
         self.passing_score = settings.passing_score
+        # 进度追踪 - 支持外部传入或内部创建
+        self._progress = progress_dict if progress_dict is not None else {
+            "total": 0,
+            "processed": 0,
+            "passed": 0,
+            "rejected": 0,
+            "current_item": None,
+            "status": "idle",
+        }
+
+    def get_progress(self) -> dict:
+        """获取当前处理进度"""
+        return self._progress.copy()
+
+    def _update_progress(self, **kwargs):
+        """更新进度"""
+        for key, value in kwargs.items():
+            if key in self._progress:
+                self._progress[key] = value
 
     async def run(
         self,
@@ -61,22 +84,50 @@ class ReviewerAgent(BaseAgent):
         else:
             contents = await CRUD.list_contents(session, status="pending", limit=limit)
 
+        # 初始化进度
+        self._progress = {
+            "total": len(contents),
+            "processed": 0,
+            "passed": 0,
+            "rejected": 0,
+            "current_item": None,
+            "status": "running",
+        }
+
         logger.info(f"[{self.name}] 开始预审 {len(contents)} 条内容")
 
-        for content in contents:
+        for i, content in enumerate(contents):
             try:
+                # 更新当前处理项
+                self._progress["current_item"] = content.title[:50]
+                
                 score_result = await self._review_content(content, session)
                 results["total_processed"] += 1
 
                 if score_result.passed:
                     results["passed"] += 1
+                    self._progress["passed"] += 1
                 else:
                     results["rejected"] += 1
+                    self._progress["rejected"] += 1
+
+                # 更新进度
+                self._progress["processed"] = i + 1
+
+                # 添加请求延迟，防止 429 限流（最后一个不需要延迟）
+                if i < len(contents) - 1:
+                    logger.debug(f"[{self.name}] 等待 {API_REQUEST_DELAY} 秒后继续...")
+                    await asyncio.sleep(API_REQUEST_DELAY)
 
             except Exception as e:
                 logger.error(f"[{self.name}] 预审失败: {content.title[:50]}, 错误: {e}")
                 results["errors"].append(str(e))
+                self._progress["processed"] = i + 1
+                # 错误后也添加延迟
+                if i < len(contents) - 1:
+                    await asyncio.sleep(API_REQUEST_DELAY)
 
+        self._progress["status"] = "completed"
         logger.info(
             f"[{self.name}] 预审完成: 处理 {results['total_processed']}, "
             f"通过 {results['passed']}, 拒绝 {results['rejected']}"

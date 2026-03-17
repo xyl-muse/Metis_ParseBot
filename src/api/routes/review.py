@@ -1,7 +1,7 @@
 """预审路由"""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.schemas import (
@@ -18,6 +18,17 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/review", tags=["预审管理"])
 
+# 全局预审智能体实例（用于查询进度）
+_reviewer_agent: Optional[ReviewerAgent] = None
+_review_progress: dict = {
+    "status": "idle",
+    "total": 0,
+    "processed": 0,
+    "passed": 0,
+    "rejected": 0,
+    "current_item": None,
+}
+
 
 async def get_session():
     """获取数据库会话"""
@@ -25,25 +36,94 @@ async def get_session():
         yield session
 
 
+async def run_review_background(content_id: Optional[str], limit: int):
+    """后台执行预审任务"""
+    global _review_progress, _reviewer_agent
+    
+    _review_progress = {"status": "running", "total": 0, "processed": 0, "passed": 0, "rejected": 0, "current_item": None}
+    
+    try:
+        async with db.async_session() as session:
+            # 传入全局进度字典，让agent直接更新
+            _reviewer_agent = ReviewerAgent(progress_dict=_review_progress)
+            result = await _reviewer_agent.run(
+                content_id=content_id,
+                session=session,
+                limit=limit,
+            )
+            _review_progress["status"] = "completed"
+            logger.info(f"后台预审完成: {result}")
+    except Exception as e:
+        logger.error(f"后台预审失败: {e}")
+        _review_progress["status"] = "error"
+        _review_progress["error"] = str(e)
+
+
 @router.post("", response_model=BaseResponse)
 async def trigger_review(
+    background_tasks: BackgroundTasks,
     request: Optional[ReviewRequest] = None,
     limit: int = Query(50, ge=1, le=100, description="最大处理数量"),
     session: AsyncSession = Depends(get_session),
 ):
-    """触发预审任务"""
-    logger.info(f"触发预审任务: content_id={request.content_id if request else None}")
+    """触发预审任务（后台执行）"""
+    global _review_progress
     
-    agent = ReviewerAgent()
-    result = await agent.run(
-        content_id=request.content_id if request else None,
-        session=session,
-        limit=limit,
-    )
+    if _review_progress.get("status") == "running":
+        return BaseResponse(success=False, message="已有预审任务正在执行中")
     
-    return BaseResponse(
-        message=f"预审完成: 处理 {result['total_processed']}, 通过 {result['passed']}, 拒绝 {result['rejected']}"
-    )
+    content_id = request.content_id if request else None
+    logger.info(f"触发预审任务: content_id={content_id}")
+    
+    # 重置进度
+    _review_progress = {"status": "starting", "total": 0, "processed": 0, "passed": 0, "rejected": 0, "current_item": None}
+    
+    # 启动后台任务
+    background_tasks.add_task(run_review_background, content_id, limit)
+    
+    return BaseResponse(message="预审任务已启动，请通过进度API查询进度")
+
+
+@router.get("/progress")
+async def get_review_progress():
+    """获取预审进度"""
+    global _review_progress, _reviewer_agent
+    
+    # 优先使用全局进度（后台任务模式）
+    if _review_progress.get("status") != "idle":
+        progress = _review_progress
+        return {
+            "status": progress.get("status", "idle"),
+            "total": progress.get("total", 0),
+            "processed": progress.get("processed", 0),
+            "passed": progress.get("passed", 0),
+            "rejected": progress.get("rejected", 0),
+            "current_item": progress.get("current_item"),
+            "percentage": round(progress.get("processed", 0) / max(progress.get("total", 1), 1) * 100, 1),
+        }
+    
+    # 兼容模式：从agent获取进度
+    if _reviewer_agent is None:
+        return {
+            "status": "idle",
+            "total": 0,
+            "processed": 0,
+            "passed": 0,
+            "rejected": 0,
+            "current_item": None,
+            "percentage": 0,
+        }
+    
+    progress = _reviewer_agent.get_progress()
+    return {
+        "status": progress.get("status", "idle"),
+        "total": progress.get("total", 0),
+        "processed": progress.get("processed", 0),
+        "passed": progress.get("passed", 0),
+        "rejected": progress.get("rejected", 0),
+        "current_item": progress.get("current_item"),
+        "percentage": round(progress.get("processed", 0) / max(progress.get("total", 1), 1) * 100, 1),
+    }
 
 
 @router.get("/pending")

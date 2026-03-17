@@ -44,11 +44,9 @@ export function ContentListItem({ content, review, onClick }: ContentListItemPro
         </div>
         
         <div className="flex flex-wrap items-center gap-2 mt-1">
+          <Badge type="source" value={content.source} />
           <Badge type="category" value={content.category} />
           <Badge type="status" value={content.status} />
-          <span className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700">
-            {content.source}
-          </span>
         </div>
         
         {/* 摘要预览 */}

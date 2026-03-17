@@ -1,7 +1,7 @@
 """采集智能体"""
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,12 +37,43 @@ class CollectorAgent(BaseAgent):
         # 初始化 arXiv 源
         sources["arxiv"] = ArxivSource()
         
-        # 初始化新闻源
+        # 初始化传统新闻源（HackerNews, Reddit）
         for news_source in settings.news_sources:
             try:
                 sources[news_source] = NewsSourceFactory.create(news_source)
             except ValueError as e:
                 logger.warning(f"初始化新闻源失败: {e}")
+        
+        # 初始化学术论文源
+        for academic_source in settings.academic_sources:
+            try:
+                sources[academic_source] = NewsSourceFactory.create(academic_source)
+            except ValueError as e:
+                logger.warning(f"初始化学术源失败: {e}")
+        
+        # 初始化技术新闻源
+        for tech_source in settings.tech_sources:
+            try:
+                sources[tech_source] = NewsSourceFactory.create(tech_source)
+            except ValueError as e:
+                logger.warning(f"初始化技术源失败: {e}")
+        
+        # 初始化安全新闻源
+        for security_source in settings.security_sources:
+            try:
+                sources[security_source] = NewsSourceFactory.create(security_source)
+            except ValueError as e:
+                logger.warning(f"初始化安全源失败: {e}")
+        
+        # 初始化 AI 公司博客
+        for blog_source in settings.ai_blog_sources:
+            try:
+                source_name = f"blog_{blog_source}"
+                sources[source_name] = NewsSourceFactory.create(source_name)
+            except ValueError as e:
+                logger.warning(f"初始化博客源失败: {e}")
+        
+        logger.info(f"已初始化 {len(sources)} 个数据源: {list(sources.keys())}")
         
         return sources
 
@@ -184,9 +215,17 @@ class CollectorAgent(BaseAgent):
         if not item.published_date:
             return True
 
+        # 获取当前时间（带时区）
+        current_time = datetime.now(timezone.utc)
+        
+        # 确保 published_date 也是带时区的
+        published_date = item.published_date
+        if published_date.tzinfo is None:
+            # 如果没有时区信息，假设为 UTC
+            published_date = published_date.replace(tzinfo=timezone.utc)
+
         # 计算内容发布日期与当前日期的差值
-        current_time = datetime.utcnow()
-        time_diff = current_time - item.published_date
+        time_diff = current_time - published_date
         days_diff = time_diff.days
 
         # 检查是否超过配置的时效限制

@@ -19,6 +19,12 @@ export default function Contents() {
   const [reviews, setReviews] = useState<Record<string, Review>>({})
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [statusCounts, setStatusCounts] = useState({
+    reviewed: 0,
+    analyzed: 0,
+    rejected: 0,
+    pending: 0,
+  })
   
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '')
   const [categoryFilter, setCategoryFilter] = useState(searchParams.get('category') || '')
@@ -27,36 +33,46 @@ export default function Contents() {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list') // 默认列表视图
 
   useEffect(() => {
+    fetchStatusCounts()
+  }, [])
+
+  useEffect(() => {
     fetchContents()
   }, [page, activeTab, categoryFilter])
+
+  // 获取各状态的内容数量
+  async function fetchStatusCounts() {
+    try {
+      const res = await fetch('/api/contents/dashboard')
+      const data = await res.json()
+      setStatusCounts({
+        reviewed: data.status_counts?.reviewed || 0,
+        analyzed: data.status_counts?.analyzed || 0,
+        rejected: data.status_counts?.rejected || 0,
+        pending: data.status_counts?.pending || 0,
+      })
+    } catch (error) {
+      console.error('Failed to fetch status counts:', error)
+    }
+  }
 
   async function fetchContents() {
     try {
       setLoading(true)
       
-      // 获取所有内容，根据当前标签页筛选
+      // 获取当前标签页的内容
       const res = await contentApi.list({
         status: activeTab || undefined,
         category: categoryFilter || undefined,
         page,
-        page_size: 20, // 增加每页数量，因为现在按状态分页
+        page_size: 20,
       })
       
-      // 根据状态分组内容
-      const groupedContents: Record<string, Content[]> = {
-        pending: [],
-        reviewed: [],
-        analyzed: [],
-        rejected: [],
-      }
-      
-      res.data.data.forEach((content: Content) => {
-        if (groupedContents[content.status]) {
-          groupedContents[content.status].push(content)
-        }
-      })
-      
-      setContents(groupedContents)
+      // 更新当前标签的内容
+      setContents(prev => ({
+        ...prev,
+        [activeTab]: res.data.data,
+      }))
       setTotal(res.data.total)
 
       // 获取已预审内容的评分
@@ -117,14 +133,6 @@ export default function Contents() {
       )
     : currentContents
 
-  // 获取各状态的数量
-  const statusCounts = {
-    reviewed: contents.reviewed?.length || 0,
-    analyzed: contents.analyzed?.length || 0,
-    rejected: contents.rejected?.length || 0,
-    pending: contents.pending?.length || 0,
-  }
-
   return (
     <div className="space-y-6 animate-fade-in">
       {/* 标签页导航 */}
@@ -178,7 +186,7 @@ export default function Contents() {
             }`}
           >
             <Clock className="w-4 h-4" />
-            待处理 <span className="ml-1 bg-slate-200 dark:bg-slate-700 rounded-full px-2 py-0.5 text-xs">
+            待预审 <span className="ml-1 bg-slate-200 dark:bg-slate-700 rounded-full px-2 py-0.5 text-xs">
               {statusCounts.pending}
             </span>
           </button>
@@ -250,7 +258,7 @@ export default function Contents() {
       {/* 当前标签页的统计信息 */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          共 <span className="font-medium text-slate-700 dark:text-slate-300">{filteredContents.length}</span> 条内容
+          共 <span className="font-medium text-slate-700 dark:text-slate-300">{total}</span> 条内容
         </p>
         <div className="flex gap-2">
           {categoryFilter && (
@@ -306,7 +314,7 @@ export default function Contents() {
       )}
 
       {/* 分页 */}
-      {filteredContents.length > 0 && (
+      {total > 0 && (
         <div className="flex items-center justify-center gap-2">
           <Button
             variant="outline"
@@ -316,11 +324,11 @@ export default function Contents() {
             上一页
           </Button>
           <span className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">
-            第 {page} 页
+            第 {page} 页 / 共 {Math.ceil(total / 20)} 页
           </span>
           <Button
             variant="outline"
-            disabled={page * 20 >= (filteredContents.length || 1)}
+            disabled={page * 20 >= total}
             onClick={() => setPage((p) => p + 1)}
           >
             下一页

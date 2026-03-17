@@ -107,6 +107,73 @@
 - [x] 优化内容采集流程，过滤过期内容
 - [x] 改进API响应处理逻辑
 
+### 2026-03-17 功能修复与优化 [完成]
+
+**启动脚本优化**
+- [x] 修复启动脚本健康检查失败问题（改用 curl 和 .Net WebClient 双重检查）
+- [x] 优化启动流程：运行服务后自动结束启动bat
+- [x] 智能检测Python环境：优先使用虚拟环境，否则使用系统python
+- [x] 启动前检查依赖，未安装则提示自动安装
+- [x] 修复metis插画右侧框对齐问题
+
+**前端界面修复**
+- [x] 修复仪表盘统计数据全部显示为0的问题
+  - 改进Dashboard.tsx数据获取逻辑
+  - 添加更好的错误处理和空值处理
+- [x] 修复内容库标签页数量显示问题
+  - 组件加载时调用dashboard API获取各状态数量
+- [x] 修复最近采集没有显示内容的问题
+  - 改进后端dashboard API排序逻辑
+  - 添加日志和边界情况处理
+- [x] 优化"待处理"命名为"待预审"，明确流程节点
+
+**后端API优化**
+- [x] 修复预审/分析操作429限流错误
+  - 在ReviewerAgent中添加2秒API请求延迟
+  - 在AnalyzerAgent中添加3秒API请求延迟
+- [x] 改进dashboard API
+  - 添加日志记录
+  - 改进空值处理
+  - 优化排序逻辑（按collected_at降序）
+- [x] 修复快捷操作批量处理逻辑
+  - 预审和分析操作自动处理队列中的待处理内容
+
+### 2026-03-17 功能增强与Bug修复 [进行中]
+
+**新增采集源**
+- [x] 添加学术论文源：OpenReview、Semantic Scholar、Papers with Code
+- [x] 添加技术新闻源：GitHub Trending、Hugging Face
+- [x] 添加安全新闻源：FreeBuf、安全牛
+- [x] 添加AI公司博客：OpenAI、Anthropic、Google AI
+- [x] 实现双语对照支持（英文内容输出英文+中文翻译）
+
+**Bug修复**
+- [x] 修复datetime时区问题（使用datetime.now(timezone.utc)替代datetime.utcnow()）
+- [x] 修复前端超时问题（长时间操作超时从30秒增加到10分钟）
+- [x] 修复内容库分页问题（后端API返回正确的total总数）
+- [x] 修复前端分页逻辑（使用total判断是否有下一页）
+
+**进度显示功能**
+- [x] 预审/分析改为后台任务模式
+- [x] 添加进度查询API（/api/review/progress、/api/analyze/progress）
+- [x] 前端轮询显示进度条
+- [x] 显示完成条数（通过/拒绝/成功/失败）
+
+**学习记录页面改造**
+- [x] 添加三个标签页：未学习、已学习、收藏
+- [x] 每个标签页显示对应计数
+- [x] 原地展开详情功能（点击展开显示完整分析内容）
+- [x] 添加学习笔记编辑功能
+- [x] 显示知识关联、易混淆辨析、学习建议
+- [x] 修复后端API的total计数问题
+
+**数据一致性修复**
+- [x] 修改AnalyzerAgent，确保即使review为None也能创建学习记录
+- [x] 添加数据一致性检查API（GET /api/learning/check-consistency）
+- [x] 添加数据一致性修复API（POST /api/learning/fix-consistency）
+- [x] 在学习记录页面添加"修复数据"按钮
+- [ ] 修复API报错问题（待验证）
+
 ---
 
 ## 代码统计
@@ -216,4 +283,4 @@ Metis_ParseBot/
 
 ---
 
-*最后更新: 2026-03-16*
+*最后更新: 2026-03-17*

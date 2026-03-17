@@ -173,9 +173,38 @@ class NewsSourceFactory:
     @staticmethod
     def create(source_name: str) -> BaseSource:
         """创建新闻源实例"""
+        # 原有数据源
         if source_name == "hackernews":
             return HackerNewsSource()
         elif source_name.startswith("reddit_"):
             return RedditSource(subreddit_type=source_name)
+        # 新增学术论文源
+        elif source_name == "openreview":
+            from src.agents.collector.sources.academic import OpenReviewSource
+            return OpenReviewSource()
+        elif source_name == "semantic_scholar":
+            from src.agents.collector.sources.academic import SemanticScholarSource
+            return SemanticScholarSource()
+        elif source_name == "papers_with_code":
+            from src.agents.collector.sources.academic import PapersWithCodeSource
+            return PapersWithCodeSource()
+        # 新增技术新闻源
+        elif source_name == "github_trending":
+            from src.agents.collector.sources.tech_news import GitHubTrendingSource
+            return GitHubTrendingSource()
+        elif source_name == "huggingface":
+            from src.agents.collector.sources.tech_news import HuggingFaceSource
+            return HuggingFaceSource()
+        elif source_name == "freebuf":
+            from src.agents.collector.sources.tech_news import SecurityNewsSource
+            return SecurityNewsSource(source_name="freebuf")
+        elif source_name == "aqniu":
+            from src.agents.collector.sources.tech_news import SecurityNewsSource
+            return SecurityNewsSource(source_name="aqniu")
+        # AI 公司博客
+        elif source_name.startswith("blog_"):
+            from src.agents.collector.sources.tech_news import AICompanyBlogSource
+            company = source_name.replace("blog_", "")
+            return AICompanyBlogSource(company=company)
         else:
             raise ValueError(f"未知的新闻源: {source_name}")

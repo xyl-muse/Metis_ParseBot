@@ -1,4 +1,5 @@
 """总结分析智能体"""
+import asyncio
 import json
 from typing import Optional
 
@@ -16,6 +17,9 @@ from src.db.models import Content, Review
 
 logger = get_logger(__name__)
 
+# API 请求间隔（秒），防止 429 限流
+API_REQUEST_DELAY = 3.0
+
 
 class AnalyzerAgent(BaseAgent):
     """
@@ -24,10 +28,29 @@ class AnalyzerAgent(BaseAgent):
     负责对通过预审的内容进行深度分析和总结。
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, progress_dict: Optional[dict] = None, **kwargs):
         super().__init__(name="AnalyzerAgent", **kwargs)
         self.summarizer = Summarizer(self.llm)
         self.knowledge_analyzer = KnowledgeAnalyzer(self.llm)
+        # 进度追踪 - 支持外部传入或内部创建
+        self._progress = progress_dict if progress_dict is not None else {
+            "total": 0,
+            "processed": 0,
+            "success": 0,
+            "failed": 0,
+            "current_item": None,
+            "status": "idle",
+        }
+
+    def get_progress(self) -> dict:
+        """获取当前处理进度"""
+        return self._progress.copy()
+
+    def _update_progress(self, **kwargs):
+        """更新进度"""
+        for key, value in kwargs.items():
+            if key in self._progress:
+                self._progress[key] = value
 
     async def run(
         self,
@@ -62,18 +85,43 @@ class AnalyzerAgent(BaseAgent):
         else:
             contents = await CRUD.list_contents(session, status="reviewed", limit=limit)
 
+        # 初始化进度
+        self._progress["total"] = len(contents)
+        self._progress["processed"] = 0
+        self._progress["success"] = 0
+        self._progress["failed"] = 0
+        self._progress["status"] = "running"
+
         logger.info(f"[{self.name}] 开始分析 {len(contents)} 条内容")
 
-        for content in contents:
+        for i, content in enumerate(contents):
             try:
+                # 更新当前处理项
+                self._progress["current_item"] = content.title[:50]
+                
                 await self._analyze_content(content, session)
                 results["total_processed"] += 1
                 results["success"] += 1
+                self._progress["success"] += 1
+
+                # 添加请求延迟，防止 429 限流（最后一个不需要延迟）
+                if i < len(contents) - 1:
+                    logger.debug(f"[{self.name}] 等待 {API_REQUEST_DELAY} 秒后继续...")
+                    await asyncio.sleep(API_REQUEST_DELAY)
 
             except Exception as e:
                 logger.error(f"[{self.name}] 分析失败: {content.title[:50]}, 错误: {e}")
                 results["errors"].append(str(e))
+                self._progress["failed"] += 1
+                # 错误后也添加延迟
+                if i < len(contents) - 1:
+                    await asyncio.sleep(API_REQUEST_DELAY)
+            
+            finally:
+                # 更新进度
+                self._progress["processed"] = i + 1
 
+        self._progress["status"] = "completed"
         logger.info(
             f"[{self.name}] 分析完成: 处理 {results['total_processed']}, "
             f"成功 {results['success']}"
@@ -123,12 +171,33 @@ class AnalyzerAgent(BaseAgent):
             related_topics=knowledge_result.related_topics,
         )
 
-        # 创建学习记录
+        # 创建学习记录（必须有review才能创建完整的学习记录）
         if review:
             await CRUD.create_learning_record(
                 session=session,
                 content=content,
                 review=review,
+                analysis=analysis,
+            )
+        else:
+            # 如果没有review记录，创建一个默认的review记录
+            logger.warning(f"[{self.name}] 内容没有预审记录，创建默认预审记录: {content.title[:30]}")
+            default_review = await CRUD.create_review(
+                session=session,
+                content_id=content.id,
+                novelty_score=60,
+                utility_score=60,
+                authority_score=60,
+                timeliness_score=60,
+                completeness_score=60,
+                total_score=60.0,
+                passed=True,
+                review_notes="系统自动创建的默认预审记录",
+            )
+            await CRUD.create_learning_record(
+                session=session,
+                content=content,
+                review=default_review,
                 analysis=analysis,
             )
 

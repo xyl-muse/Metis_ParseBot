@@ -1,8 +1,10 @@
 """内容管理路由"""
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_
 
 from src.api.schemas import (
     ContentListResponse,
@@ -10,6 +12,7 @@ from src.api.schemas import (
     BaseResponse,
 )
 from src.db.crud import CRUD, db
+from src.db.models import Content
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -19,42 +22,75 @@ router = APIRouter(prefix="/contents", tags=["内容管理"])
 @router.get("/dashboard")
 async def get_dashboard():
     """获取仪表盘统计数据"""
-    async with db.async_session() as session:
-        # 获取各状态内容数量
-        from sqlalchemy import select, func
-        from src.db.models import Content
-        
-        # 统计各状态数量
-        status_counts = {}
-        for status in ["pending", "reviewed", "analyzed", "rejected"]:
-            stmt = select(func.count()).select_from(Content).where(Content.status == status)
-            result = await session.execute(stmt)
-            status_counts[status] = result.scalar() or 0
-        
-        # 获取总数
-        total_stmt = select(func.count()).select_from(Content)
-        total_result = await session.execute(total_stmt)
-        total = total_result.scalar() or 0
-        
-        # 获取最近内容
-        recent_stmt = select(Content).order_by(Content.collected_at.desc()).limit(5)
-        recent_result = await session.execute(recent_stmt)
-        recent_contents = recent_result.scalars().all()
-        
-        return {
-            "total": total,
-            "status_counts": status_counts,
-            "recent_contents": [
-                {
+    import json
+    from sqlalchemy import select, func
+    from src.db.models import Content
+    
+    try:
+        async with db.async_session() as session:
+            # 统计各状态数量
+            status_counts = {}
+            for status in ["pending", "reviewed", "analyzed", "rejected"]:
+                stmt = select(func.count()).select_from(Content).where(Content.status == status)
+                result = await session.execute(stmt)
+                status_counts[status] = result.scalar() or 0
+            
+            # 获取总数
+            total_stmt = select(func.count()).select_from(Content)
+            total_result = await session.execute(total_stmt)
+            total = total_result.scalar() or 0
+            
+            logger.info(f"Dashboard stats: total={total}, status_counts={status_counts}")
+            
+            # 获取最近内容 - 按 collected_at 降序，如果为 NULL 则按 id 降序
+            recent_stmt = (
+                select(Content)
+                .order_by(Content.collected_at.desc().nulls_last(), Content.id.desc())
+                .limit(5)
+            )
+            recent_result = await session.execute(recent_stmt)
+            recent_contents = recent_result.scalars().all()
+            
+            logger.info(f"Found {len(recent_contents)} recent contents")
+            
+            # 构建返回数据
+            recent_data = []
+            for c in recent_contents:
+                try:
+                    tags_data = json.loads(c.tags) if c.tags else None
+                except (json.JSONDecodeError, TypeError):
+                    tags_data = None
+                
+                recent_data.append({
                     "id": c.id,
-                    "title": c.title,
-                    "source": c.source,
-                    "category": c.category,
-                    "status": c.status,
+                    "title": c.title or "无标题",
+                    "source": c.source or "",
+                    "source_url": c.source_url or "",
+                    "category": c.category or "",
+                    "summary": c.summary or "",
+                    "status": c.status or "pending",
+                    "tags": tags_data,
                     "collected_at": c.collected_at.isoformat() if c.collected_at else None,
-                }
-                for c in recent_contents
-            ]
+                    "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+                })
+            
+            response_data = {
+                "total": total,
+                "status_counts": status_counts,
+                "recent_contents": recent_data
+            }
+            
+            logger.info(f"Dashboard response: total={total}, recent_count={len(recent_data)}")
+            
+            return response_data
+            
+    except Exception as e:
+        logger.error(f"Dashboard API error: {e}", exc_info=True)
+        # 返回空数据而不是抛出错误
+        return {
+            "total": 0,
+            "status_counts": {"pending": 0, "reviewed": 0, "analyzed": 0, "rejected": 0},
+            "recent_contents": []
         }
 
 
@@ -75,6 +111,24 @@ async def list_contents(
 ):
     """获取内容列表"""
     offset = (page - 1) * page_size
+    
+    # 构建查询条件
+    conditions = []
+    if status:
+        conditions.append(Content.status == status)
+    if category:
+        conditions.append(Content.category == category)
+    if source:
+        conditions.append(Content.source == source)
+    
+    # 获取总数
+    count_stmt = select(func.count()).select_from(Content)
+    if conditions:
+        count_stmt = count_stmt.where(and_(*conditions))
+    total_result = await session.execute(count_stmt)
+    total = total_result.scalar() or 0
+    
+    # 获取数据
     contents = await CRUD.list_contents(
         session,
         status=status,
@@ -87,7 +141,6 @@ async def list_contents(
     # 转换为响应格式
     data = []
     for content in contents:
-        import json
         data.append(ContentResponse(
             id=content.id,
             title=content.title,
@@ -104,7 +157,7 @@ async def list_contents(
     
     return ContentListResponse(
         data=data,
-        total=len(data),  # 简化处理，实际应该单独查询总数
+        total=total,
         page=page,
         page_size=page_size,
     )

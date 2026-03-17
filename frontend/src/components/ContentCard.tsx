@@ -32,6 +32,7 @@ export function ContentCard({ content, review, onClick }: ContentCardProps) {
             />
           </div>
           <div className="flex items-center gap-2 mt-2">
+            <Badge type="source" value={content.source} />
             <Badge type="category" value={content.category} />
             <Badge type="status" value={content.status} />
           </div>

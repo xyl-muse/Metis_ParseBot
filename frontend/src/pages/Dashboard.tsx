@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   FileText,
@@ -12,6 +12,26 @@ import {
 import { StatCard, Card, Button, ContentCard } from '@/components'
 import { contentApi, collectApi, reviewApi, analyzeApi, systemApi } from '@/services/api'
 import type { Content, SystemStatus, CollectResult } from '@/types'
+
+interface ReviewProgress {
+  status: string
+  total: number
+  processed: number
+  passed: number
+  rejected: number
+  current_item: string | null
+  percentage: number
+}
+
+interface AnalyzeProgress {
+  status: string
+  total: number
+  processed: number
+  success: number
+  failed: number
+  current_item: string | null
+  percentage: number
+}
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -32,8 +52,18 @@ export default function Dashboard() {
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionStatus, setActionStatus] = useState<'success' | 'error' | null>(null)
 
+  // 进度状态
+  const [reviewProgress, setReviewProgress] = useState<ReviewProgress | null>(null)
+  const [analyzeProgress, setAnalyzeProgress] = useState<AnalyzeProgress | null>(null)
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
   useEffect(() => {
     fetchDashboardData()
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
+      }
+    }
   }, [])
 
   async function fetchDashboardData() {
@@ -41,25 +71,103 @@ export default function Dashboard() {
       setLoading(true)
       
       // 获取系统状态
-      const statusRes = await systemApi.getStatus()
-      setSystemStatus(statusRes.data)
+      try {
+        const statusRes = await systemApi.getStatus()
+        setSystemStatus(statusRes.data)
+      } catch (e) {
+        console.error('Failed to fetch system status:', e)
+      }
 
       // 使用 dashboard API 获取统计数据
-      const dashboardRes = await fetch('/api/contents/dashboard')
-      const dashboardData = await dashboardRes.json()
-      
-      setStats({
-        total: dashboardData.total,
-        pending: dashboardData.status_counts?.pending || 0,
-        reviewed: dashboardData.status_counts?.reviewed || 0,
-        analyzed: dashboardData.status_counts?.analyzed || 0,
-      })
+      try {
+        const dashboardRes = await fetch('/api/contents/dashboard')
+        if (!dashboardRes.ok) {
+          throw new Error(`HTTP error! status: ${dashboardRes.status}`)
+        }
+        const dashboardData = await dashboardRes.json()
+        
+        console.log('Dashboard API response:', dashboardData)
+        
+        // 检查数据结构
+        if (dashboardData && typeof dashboardData === 'object') {
+          setStats({
+            total: dashboardData.total ?? 0,
+            pending: dashboardData.status_counts?.pending ?? 0,
+            reviewed: dashboardData.status_counts?.reviewed ?? 0,
+            analyzed: dashboardData.status_counts?.analyzed ?? 0,
+          })
 
-      setRecentContents(dashboardData.recent_contents || [])
+          // 处理最近采集数据，确保包含所有必需字段
+          const recentItems = Array.isArray(dashboardData.recent_contents) 
+            ? dashboardData.recent_contents.map((item: any) => ({
+                id: item.id || '',
+                title: item.title || '无标题',
+                source: item.source || '',
+                source_url: item.source_url || '',
+                category: item.category || '',
+                summary: item.summary || '',
+                status: item.status || 'pending',
+                tags: item.tags || null,
+                collected_at: item.collected_at || new Date().toISOString(),
+                updated_at: item.updated_at || new Date().toISOString(),
+                authors: item.authors || null,
+              }))
+            : []
+          
+          console.log('Processed recent items:', recentItems.length)
+          setRecentContents(recentItems)
+        }
+      } catch (e) {
+        console.error('Failed to fetch dashboard data:', e)
+      }
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // 轮询预审进度
+  async function pollReviewProgress() {
+    try {
+      const res = await reviewApi.getProgress()
+      setReviewProgress(res.data)
+      if (res.data.status === 'idle' || res.data.status === 'completed') {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current)
+          progressIntervalRef.current = null
+        }
+        if (res.data.status === 'completed') {
+          setActionStatus('success')
+          setActionMessage(`预审完成！处理 ${res.data.processed} 条，通过 ${res.data.passed} 条，拒绝 ${res.data.rejected} 条`)
+          setReviewLoading(false)
+          fetchDashboardData()
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch review progress:', e)
+    }
+  }
+
+  // 轮询分析进度
+  async function pollAnalyzeProgress() {
+    try {
+      const res = await analyzeApi.getProgress()
+      setAnalyzeProgress(res.data)
+      if (res.data.status === 'idle' || res.data.status === 'completed') {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current)
+          progressIntervalRef.current = null
+        }
+        if (res.data.status === 'completed') {
+          setActionStatus('success')
+          setActionMessage(`分析完成！处理 ${res.data.processed} 条，成功 ${res.data.success} 条，失败 ${res.data.failed} 条`)
+          setAnalyzeLoading(false)
+          fetchDashboardData()
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch analyze progress:', e)
     }
   }
 
@@ -106,17 +214,23 @@ export default function Dashboard() {
     try {
       setReviewLoading(true)
       setActionMessage(null)
+      setReviewProgress(null)
+      
+      // 启动预审
       const res = await reviewApi.trigger({ limit: 10 })
+      
       if (res.data.success) {
-        setActionStatus('success')
-        setActionMessage('预审完成！')
-        fetchDashboardData()
+        // 开始轮询进度
+        progressIntervalRef.current = setInterval(pollReviewProgress, 1000)
+      } else {
+        setActionStatus('error')
+        setActionMessage('预审启动失败')
+        setReviewLoading(false)
       }
     } catch (error) {
       console.error('Failed to review:', error)
       setActionStatus('error')
       setActionMessage('预审失败，请查看控制台日志')
-    } finally {
       setReviewLoading(false)
     }
   }
@@ -125,17 +239,23 @@ export default function Dashboard() {
     try {
       setAnalyzeLoading(true)
       setActionMessage(null)
+      setAnalyzeProgress(null)
+      
+      // 启动分析
       const res = await analyzeApi.trigger({ limit: 5 })
+      
       if (res.data.success) {
-        setActionStatus('success')
-        setActionMessage('分析完成！')
-        fetchDashboardData()
+        // 开始轮询进度
+        progressIntervalRef.current = setInterval(pollAnalyzeProgress, 1000)
+      } else {
+        setActionStatus('error')
+        setActionMessage('分析启动失败')
+        setAnalyzeLoading(false)
       }
     } catch (error) {
       console.error('Failed to analyze:', error)
       setActionStatus('error')
       setActionMessage('分析失败，请查看控制台日志')
-    } finally {
       setAnalyzeLoading(false)
     }
   }
@@ -186,6 +306,64 @@ export default function Dashboard() {
         </Card>
       )}
 
+      {/* 预审进度条 */}
+      {reviewLoading && reviewProgress && (
+        <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-blue-800 dark:text-blue-200">预审进度</span>
+              <span className="text-sm text-blue-600 dark:text-blue-400">
+                {reviewProgress.processed} / {reviewProgress.total}
+              </span>
+            </div>
+            <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-3">
+              <div 
+                className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                style={{ width: `${reviewProgress.percentage}%` }}
+              />
+            </div>
+            {reviewProgress.current_item && (
+              <p className="text-sm text-blue-600 dark:text-blue-400 truncate">
+                当前处理: {reviewProgress.current_item}
+              </p>
+            )}
+            <div className="flex gap-4 text-sm">
+              <span className="text-green-600">通过: {reviewProgress.passed}</span>
+              <span className="text-red-600">拒绝: {reviewProgress.rejected}</span>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* 分析进度条 */}
+      {analyzeLoading && analyzeProgress && (
+        <Card className="bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-purple-800 dark:text-purple-200">分析进度</span>
+              <span className="text-sm text-purple-600 dark:text-purple-400">
+                {analyzeProgress.processed} / {analyzeProgress.total}
+              </span>
+            </div>
+            <div className="w-full bg-purple-200 dark:bg-purple-800 rounded-full h-3">
+              <div 
+                className="bg-purple-600 h-3 rounded-full transition-all duration-300"
+                style={{ width: `${analyzeProgress.percentage}%` }}
+              />
+            </div>
+            {analyzeProgress.current_item && (
+              <p className="text-sm text-purple-600 dark:text-purple-400 truncate">
+                当前处理: {analyzeProgress.current_item}
+              </p>
+            )}
+            <div className="flex gap-4 text-sm">
+              <span className="text-green-600">成功: {analyzeProgress.success}</span>
+              <span className="text-red-600">失败: {analyzeProgress.failed}</span>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* 流水线结果 */}
       {pipelineResult && (
         <Card className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
@@ -212,7 +390,7 @@ export default function Dashboard() {
           color="primary"
         />
         <StatCard
-          title="待处理"
+          title="待预审"
           value={stats.pending}
           icon={<RefreshCw className="w-5 h-5" />}
           color="orange"
@@ -337,7 +515,12 @@ function QuickAction({
       <div className="text-primary-500">
         {loading ? <div className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" /> : icon}
       </div>
-      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{loading ? '处理中...' : label}</span>
+      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+        {loading ? '处理中...' : label}
+      </span>
+      {loading && (
+        <span className="text-xs text-slate-400">请耐心等待...</span>
+      )}
     </button>
   )
 }

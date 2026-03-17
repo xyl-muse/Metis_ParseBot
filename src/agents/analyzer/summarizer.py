@@ -8,7 +8,7 @@ from langchain_core.language_models import BaseChatModel
 from src.core.config import settings
 from src.core.logging import get_logger
 from src.core.exceptions import SummarizationError
-from src.agents.analyzer.prompts import SUMMARY_PROMPT
+from src.agents.analyzer.prompts import get_summary_prompt
 
 logger = get_logger(__name__)
 
@@ -61,7 +61,8 @@ class Summarizer:
             if len(content) > max_content_length:
                 truncated_content += "...(内容已截断)"
 
-            prompt = SUMMARY_PROMPT.format(
+            # 使用智能选择的 prompt（自动检测语言）
+            prompt = get_summary_prompt(
                 title=title,
                 source=source,
                 category=category,
