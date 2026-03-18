@@ -86,6 +86,7 @@ export interface LearningRecord {
   learning_suggestions: string | null
   is_read: boolean
   is_bookmarked: boolean
+  user_notes: string | null
   created_at: string
 }
 

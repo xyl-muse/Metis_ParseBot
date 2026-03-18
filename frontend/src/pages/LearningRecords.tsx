@@ -13,10 +13,13 @@ export default function LearningRecords() {
   const [activeTab, setActiveTab] = useState<TabType>('unread')
   const [counts, setCounts] = useState({ unread: 0, read: 0, bookmarked: 0 })
   const [records, setRecords] = useState<LearningRecord[]>([])
+  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const pageSize = 10
   
   const [categoryFilter, setCategoryFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [jumpPage, setJumpPage] = useState('')
   
   // 展开的学习记录ID
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -31,7 +34,7 @@ export default function LearningRecords() {
   useEffect(() => {
     setPage(1)
     fetchRecords()
-  }, [activeTab, categoryFilter])
+  }, [activeTab, categoryFilter, searchQuery])
 
   useEffect(() => {
     if (page > 1) fetchRecords()
@@ -61,8 +64,9 @@ export default function LearningRecords() {
       
       const params: any = {
         page,
-        page_size: 10,
+        page_size: pageSize,
         category: categoryFilter || undefined,
+        search: searchQuery || undefined,
       }
       
       if (activeTab === 'unread') {
@@ -75,6 +79,7 @@ export default function LearningRecords() {
       
       const res = await learningApi.list(params)
       setRecords(res.data.data)
+      setTotal(res.data.total)
     } catch (error) {
       console.error('Failed to fetch learning records:', error)
     } finally {
@@ -122,28 +127,6 @@ export default function LearningRecords() {
     }
     setEditingNotesId(null)
   }
-
-  async function fixDataConsistency() {
-    if (!confirm('确定要修复数据一致性问题吗？这将清理孤立的学习记录并为缺失的内容创建记录。')) {
-      return
-    }
-    try {
-      const res = await fetch('/api/learning/fix-consistency', { method: 'POST' })
-      const data = await res.json()
-      alert(data.message || '修复完成')
-      fetchCounts()
-      fetchRecords()
-    } catch (error) {
-      console.error('Failed to fix data consistency:', error)
-      alert('修复失败')
-    }
-  }
-
-  const filteredRecords = searchQuery
-    ? records.filter((r) =>
-        r.title.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : records
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -224,15 +207,6 @@ export default function LearningRecords() {
               <option value="news_security">安全新闻</option>
               <option value="news_cross">交叉新闻</option>
             </select>
-            
-            <Button
-              variant="outline"
-              size="md"
-              onClick={fixDataConsistency}
-              className="text-orange-600 border-orange-300 hover:bg-orange-50"
-            >
-              修复数据
-            </Button>
           </div>
         </div>
       </Card>
@@ -242,9 +216,9 @@ export default function LearningRecords() {
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500" />
         </div>
-      ) : filteredRecords.length > 0 ? (
+      ) : records.length > 0 ? (
         <div className="space-y-4">
-          {filteredRecords.map((record) => (
+          {records.map((record) => (
             <LearningRecordCard
               key={record.id}
               record={record}
@@ -278,8 +252,8 @@ export default function LearningRecords() {
       )}
 
       {/* 分页 */}
-      {filteredRecords.length === 10 && (
-        <div className="flex items-center justify-center gap-2">
+      {total > 0 && (
+        <div className="flex items-center justify-center gap-2 flex-wrap">
           <Button
             variant="outline"
             disabled={page === 1}
@@ -288,14 +262,37 @@ export default function LearningRecords() {
             上一页
           </Button>
           <span className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">
-            第 {page} 页
+            第 {page} 页 / 共 {Math.ceil(total / pageSize)} 页（共 {total} 条）
           </span>
           <Button
             variant="outline"
+            disabled={page * pageSize >= total}
             onClick={() => setPage((p) => p + 1)}
           >
             下一页
           </Button>
+          <div className="flex items-center gap-1 ml-2">
+            <span className="text-sm text-slate-500">跳转至</span>
+            <input
+              type="number"
+              min="1"
+              max={Math.ceil(total / pageSize)}
+              value={jumpPage}
+              onChange={(e) => setJumpPage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const pageNum = parseInt(jumpPage)
+                  const maxPage = Math.ceil(total / pageSize)
+                  if (pageNum >= 1 && pageNum <= maxPage) {
+                    setPage(pageNum)
+                    setJumpPage('')
+                  }
+                }
+              }}
+              className="w-16 px-2 py-1 text-sm rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-center"
+            />
+            <span className="text-sm text-slate-500">页</span>
+          </div>
         </div>
       )}
     </div>

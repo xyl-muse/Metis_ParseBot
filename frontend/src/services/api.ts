@@ -38,6 +38,7 @@ export const contentApi = {
   list: (params?: {
     status?: string
     category?: string
+    search?: string
     page?: number
     page_size?: number
   }) => api.get<PaginatedResponse<Content>>('/contents', { params }),
@@ -107,6 +108,32 @@ export const analyzeApi = {
     api.get<Analysis>(`/analyze/${contentId}`),
 }
 
+// ==================== 设置相关 ====================
+
+export const settingsApi = {
+  get: () => api.get('/settings'),
+  
+  getEnv: () => api.get<{
+    openai_api_key: string
+    openai_api_base: string
+    model_name: string
+    model_temperature: number
+    passing_score: number
+    collect_interval_hours: number
+  }>('/settings/env'),
+  
+  updateEnv: (data: {
+    openai_api_key?: string
+    openai_api_base?: string
+    model_name?: string
+    model_temperature?: number
+    passing_score?: number
+    collect_interval_hours?: number
+  }) => api.post<ApiResponse>('/settings/env', data),
+  
+  reload: () => api.post<ApiResponse>('/settings/reload'),
+}
+
 // ==================== 学习记录相关 ====================
 
 export const learningApi = {
@@ -114,6 +141,7 @@ export const learningApi = {
     category?: string
     is_read?: boolean
     is_bookmarked?: boolean
+    search?: string
     page?: number
     page_size?: number
   }) => api.get<PaginatedResponse<LearningRecord>>('/learning', { params }),
@@ -127,16 +155,6 @@ export const learningApi = {
   }) => api.patch<ApiResponse>(`/learning/${id}`, data),
 
   delete: (id: string) => api.delete(`/learning/${id}`),
-
-  checkConsistency: () => api.get<{
-    analyzed_content_count: number
-    learning_record_count: number
-    missing_learning_records: Array<{ id: string; title: string }>
-    orphan_learning_records: Array<{ id: string; title: string; content_status: string }>
-    is_consistent: boolean
-  }>('/learning/check-consistency'),
-
-  fixConsistency: () => api.post<ApiResponse>('/learning/fix-consistency'),
 }
 
 // ==================== 系统相关 ====================

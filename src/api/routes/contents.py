@@ -105,6 +105,7 @@ async def list_contents(
     status: Optional[str] = Query(None, description="状态筛选"),
     category: Optional[str] = Query(None, description="分类筛选"),
     source: Optional[str] = Query(None, description="来源筛选"),
+    search: Optional[str] = Query(None, description="标题搜索"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     session: AsyncSession = Depends(get_session),
@@ -120,6 +121,8 @@ async def list_contents(
         conditions.append(Content.category == category)
     if source:
         conditions.append(Content.source == source)
+    if search:
+        conditions.append(Content.title.ilike(f"%{search}%"))
     
     # 获取总数
     count_stmt = select(func.count()).select_from(Content)
@@ -129,14 +132,13 @@ async def list_contents(
     total = total_result.scalar() or 0
     
     # 获取数据
-    contents = await CRUD.list_contents(
-        session,
-        status=status,
-        category=category,
-        source=source,
-        limit=page_size,
-        offset=offset,
-    )
+    query = select(Content)
+    if conditions:
+        query = query.where(and_(*conditions))
+    query = query.order_by(Content.collected_at.desc()).offset(offset).limit(page_size)
+    
+    result = await session.execute(query)
+    contents = list(result.scalars().all())
     
     # 转换为响应格式
     data = []

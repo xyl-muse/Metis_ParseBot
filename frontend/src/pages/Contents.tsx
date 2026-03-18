@@ -31,6 +31,7 @@ export default function Contents() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'reviewed') // 默认显示已采纳(待分析)
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list') // 默认列表视图
+  const [jumpPage, setJumpPage] = useState('')
 
   useEffect(() => {
     fetchStatusCounts()
@@ -38,7 +39,7 @@ export default function Contents() {
 
   useEffect(() => {
     fetchContents()
-  }, [page, activeTab, categoryFilter])
+  }, [page, activeTab, categoryFilter, searchQuery])
 
   // 获取各状态的内容数量
   async function fetchStatusCounts() {
@@ -64,6 +65,7 @@ export default function Contents() {
       const res = await contentApi.list({
         status: activeTab || undefined,
         category: categoryFilter || undefined,
+        search: searchQuery || undefined,
         page,
         page_size: 20,
       })
@@ -127,11 +129,6 @@ export default function Contents() {
   }
 
   const currentContents = contents[activeTab] || []
-  const filteredContents = searchQuery
-    ? currentContents.filter((c) =>
-        c.title.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : currentContents
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -272,10 +269,10 @@ export default function Contents() {
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500" />
         </div>
-      ) : filteredContents.length > 0 ? (
+      ) : currentContents.length > 0 ? (
         viewMode === 'list' ? (
           <Card className="p-0">
-            {filteredContents.map((content) => (
+            {currentContents.map((content) => (
               <ContentListItem
                 key={content.id}
                 content={content}
@@ -286,7 +283,7 @@ export default function Contents() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredContents.map((content) => (
+            {currentContents.map((content) => (
               <ContentCard
                 key={content.id}
                 content={content}
@@ -315,7 +312,7 @@ export default function Contents() {
 
       {/* 分页 */}
       {total > 0 && (
-        <div className="flex items-center justify-center gap-2">
+        <div className="flex items-center justify-center gap-2 flex-wrap">
           <Button
             variant="outline"
             disabled={page === 1}
@@ -333,6 +330,28 @@ export default function Contents() {
           >
             下一页
           </Button>
+          <div className="flex items-center gap-1 ml-2">
+            <span className="text-sm text-slate-500">跳转至</span>
+            <input
+              type="number"
+              min="1"
+              max={Math.ceil(total / 20)}
+              value={jumpPage}
+              onChange={(e) => setJumpPage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const pageNum = parseInt(jumpPage)
+                  const maxPage = Math.ceil(total / 20)
+                  if (pageNum >= 1 && pageNum <= maxPage) {
+                    setPage(pageNum)
+                    setJumpPage('')
+                  }
+                }
+              }}
+              className="w-16 px-2 py-1 text-sm rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-center"
+            />
+            <span className="text-sm text-slate-500">页</span>
+          </div>
         </div>
       )}
     </div>

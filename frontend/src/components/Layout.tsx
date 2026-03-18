@@ -14,7 +14,7 @@ import clsx from 'clsx'
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '仪表盘' },
   { to: '/contents', icon: FileText, label: '内容库' },
-  { to: '/learning', icon: BookOpen, label: '学习记录' },
+  { to: '/learning', icon: BookOpen, label: '学习中心' },
   { to: '/settings', icon: Settings, label: '设置' },
 ]
 

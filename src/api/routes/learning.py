@@ -14,8 +14,8 @@ from src.api.schemas import (
     ConfusionNote,
     BaseResponse,
 )
-from src.db.crud import CRUD, db
-from src.db.models import LearningRecord, Content, Review, Analysis
+from src.db.crud import db
+from src.db.models import LearningRecord
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,6 +33,7 @@ async def list_learning_records(
     category: Optional[str] = Query(None, description="分类筛选"),
     is_read: Optional[bool] = Query(None, description="已读筛选"),
     is_bookmarked: Optional[bool] = Query(None, description="收藏筛选"),
+    search: Optional[str] = Query(None, description="标题搜索"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     session: AsyncSession = Depends(get_session),
@@ -51,6 +52,8 @@ async def list_learning_records(
         conditions.append(LearningRecord.is_read == is_read)
     if is_bookmarked is not None:
         conditions.append(LearningRecord.is_bookmarked == is_bookmarked)
+    if search:
+        conditions.append(LearningRecord.title.ilike(f"%{search}%"))
     
     # 获取总数
     count_stmt = select(func.count()).select_from(LearningRecord)
@@ -95,6 +98,7 @@ async def list_learning_records(
             learning_suggestions=record.learning_suggestions,
             is_read=record.is_read,
             is_bookmarked=record.is_bookmarked,
+            user_notes=record.user_notes,
             created_at=record.created_at,
         ))
     
@@ -148,6 +152,7 @@ async def get_learning_record(
         learning_suggestions=record.learning_suggestions,
         is_read=record.is_read,
         is_bookmarked=record.is_bookmarked,
+        user_notes=record.user_notes,
         created_at=record.created_at,
     )
 
@@ -202,185 +207,3 @@ async def delete_learning_record(
     await session.commit()
     
     return BaseResponse(message="删除成功")
-
-
-@router.post("/fix-consistency", response_model=BaseResponse)
-async def fix_data_consistency():
-    """
-    修复数据一致性问题：
-    1. 为已分析但没有学习记录的内容创建学习记录
-    2. 清理孤立的预审记录
-    """
-    fixed_count = 0
-    deleted_count = 0
-    errors = []
-    
-    try:
-        async with db.async_session() as session:
-            # 1. 查找已分析但没有学习记录的内容
-            result = await session.execute(
-                select(Content).where(Content.status == "analyzed")
-            )
-            analyzed_contents = list(result.scalars().all())
-            logger.info(f"找到 {len(analyzed_contents)} 条已分析内容")
-            
-            for content in analyzed_contents:
-                try:
-                    # 检查是否已有学习记录
-                    lr_result = await session.execute(
-                        select(LearningRecord).where(LearningRecord.content_id == content.id)
-                    )
-                    existing_lr = lr_result.scalar_one_or_none()
-                    
-                    if existing_lr:
-                        continue
-                    
-                    # 获取预审和分析记录
-                    review = await CRUD.get_review_by_content(session, content.id)
-                    analysis = await CRUD.get_analysis_by_content(session, content.id)
-                    
-                    if not analysis:
-                        logger.warning(f"内容 {content.id} 没有分析记录，跳过")
-                        continue
-                    
-                    # 如果没有review，创建默认的
-                    if not review:
-                        logger.info(f"为内容 {content.id} 创建默认预审记录")
-                        review = await CRUD.create_review(
-                            session=session,
-                            content_id=content.id,
-                            novelty_score=60,
-                            utility_score=60,
-                            authority_score=60,
-                            timeliness_score=60,
-                            completeness_score=60,
-                            total_score=60.0,
-                            passed=True,
-                            review_notes="系统自动修复创建的默认预审记录",
-                        )
-                    
-                    # 创建学习记录
-                    await CRUD.create_learning_record(
-                        session=session,
-                        content=content,
-                        review=review,
-                        analysis=analysis,
-                    )
-                    fixed_count += 1
-                    logger.info(f"为内容 {content.id} 创建了学习记录")
-                except Exception as e:
-                    logger.error(f"处理内容 {content.id} 时出错: {e}")
-                    errors.append(f"内容 {content.title[:30]}: {str(e)}")
-            
-            # 2. 清理孤立的学习记录（对应内容不存在或状态不是analyzed）
-            lr_result = await session.execute(select(LearningRecord))
-            all_records = list(lr_result.scalars().all())
-            logger.info(f"找到 {len(all_records)} 条学习记录")
-            
-            records_to_delete = []
-            for record in all_records:
-                try:
-                    content_result = await session.execute(
-                        select(Content).where(Content.id == record.content_id)
-                    )
-                    content = content_result.scalar_one_or_none()
-                    
-                    if not content or content.status != "analyzed":
-                        records_to_delete.append(record)
-                except Exception as e:
-                    logger.error(f"检查学习记录 {record.id} 时出错: {e}")
-            
-            # 批量删除孤立记录
-            for record in records_to_delete:
-                try:
-                    await session.delete(record)
-                    deleted_count += 1
-                    logger.info(f"删除孤立记录: {record.title[:30]}")
-                except Exception as e:
-                    logger.error(f"删除记录 {record.id} 时出错: {e}")
-                    errors.append(f"删除失败: {record.title[:30]}")
-            
-            if records_to_delete:
-                await session.commit()
-        
-        return BaseResponse(
-            message=f"数据一致性修复完成：创建 {fixed_count} 条，删除 {deleted_count} 条孤立记录",
-            data={"fixed_count": fixed_count, "deleted_count": deleted_count, "errors": errors}
-        )
-    except Exception as e:
-        logger.error(f"fix_data_consistency 出错: {e}", exc_info=True)
-        return BaseResponse(
-            success=False,
-            message=f"修复失败: {str(e)}",
-            data={"errors": [str(e)]}
-        )
-
-
-@router.get("/check-consistency")
-async def check_data_consistency():
-    """检查数据一致性"""
-    try:
-        async with db.async_session() as session:
-            # 统计已分析内容数量
-            analyzed_result = await session.execute(
-                select(func.count()).select_from(Content).where(Content.status == "analyzed")
-            )
-            analyzed_count = analyzed_result.scalar() or 0
-            
-            # 统计学习记录数量
-            lr_result = await session.execute(
-                select(func.count()).select_from(LearningRecord)
-            )
-            lr_count = lr_result.scalar() or 0
-            
-            # 查找缺失学习记录的内容
-            missing_result = await session.execute(
-                select(Content).where(Content.status == "analyzed")
-            )
-            analyzed_contents = list(missing_result.scalars().all())
-            
-            missing_learning_records = []
-            for content in analyzed_contents:
-                lr_check = await session.execute(
-                    select(LearningRecord).where(LearningRecord.content_id == content.id)
-                )
-                if not lr_check.scalar_one_or_none():
-                    missing_learning_records.append({
-                        "id": content.id,
-                        "title": content.title[:50] if len(content.title) > 50 else content.title,
-                    })
-            
-            # 查找孤立的学习记录
-            orphan_result = await session.execute(select(LearningRecord))
-            all_records = list(orphan_result.scalars().all())
-            
-            orphan_records = []
-            for record in all_records:
-                content_check = await session.execute(
-                    select(Content).where(Content.id == record.content_id)
-                )
-                content = content_check.scalar_one_or_none()
-                if not content or content.status != "analyzed":
-                    orphan_records.append({
-                        "id": record.id,
-                        "title": record.title[:50] if len(record.title) > 50 else record.title,
-                        "content_status": content.status if content else "deleted",
-                    })
-            
-            return {
-                "analyzed_content_count": analyzed_count,
-                "learning_record_count": lr_count,
-                "missing_learning_records": missing_learning_records,
-                "orphan_learning_records": orphan_records,
-                "is_consistent": len(missing_learning_records) == 0 and len(orphan_records) == 0,
-            }
-    except Exception as e:
-        logger.error(f"check_data_consistency 出错: {e}", exc_info=True)
-        return {
-            "analyzed_content_count": 0,
-            "learning_record_count": 0,
-            "missing_learning_records": [],
-            "orphan_learning_records": [],
-            "is_consistent": True,
-            "error": str(e),
-        }

@@ -4,22 +4,59 @@ import {
   Pause,
   RefreshCw,
   Clock,
-  CheckCircle,
-  AlertCircle,
   Key,
   Database,
   Server,
+  Save,
+  AlertCircle,
+  Settings as SettingsIcon,
 } from 'lucide-react'
-import { Card, Button, StatCard } from '@/components'
-import { systemApi, collectApi } from '@/services/api'
-import type { SystemStatus } from '@/types'
+import { Card, Button } from '@/components'
+import { systemApi, settingsApi } from '@/services/api'
+
+interface SystemSettings {
+  app_name: string
+  version: string
+  database: {
+    type: string
+    connected: boolean
+    url_display: string
+  }
+  llm: {
+    provider: string | null
+    model: string | null
+    configured: boolean
+    api_base?: string
+    temperature?: number
+  }
+  collect_interval_hours: number
+  max_items_per_run: number
+  passing_score: number
+}
+
+interface EnvConfig {
+  openai_api_key: string
+  openai_api_base: string
+  model_name: string
+  model_temperature: number
+  passing_score: number
+  collect_interval_hours: number
+}
 
 export default function Settings() {
   const [loading, setLoading] = useState(true)
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [systemStatus, setSystemStatus] = useState<SystemSettings | null>(null)
   const [schedulerRunning, setSchedulerRunning] = useState(false)
-  const [jobs, setJobs] = useState<any[]>([])
-  const [sources, setSources] = useState<any[]>([])
+  const [envConfig, setEnvConfig] = useState<EnvConfig>({
+    openai_api_key: '',
+    openai_api_base: 'https://api.openai.com/v1',
+    model_name: 'gpt-4',
+    model_temperature: 0.2,
+    passing_score: 60,
+    collect_interval_hours: 6,
+  })
+  const [editMode, setEditMode] = useState(false)
 
   useEffect(() => {
     fetchSettings()
@@ -29,16 +66,15 @@ export default function Settings() {
     try {
       setLoading(true)
       
-      const [statusRes, jobsRes, sourcesRes] = await Promise.all([
-        systemApi.getStatus(),
+      const [statusRes, jobsRes, envRes] = await Promise.all([
+        settingsApi.get(),
         systemApi.getSchedulerJobs(),
-        collectApi.getSources(),
+        settingsApi.getEnv(),
       ])
       
       setSystemStatus(statusRes.data)
-      setJobs(jobsRes.data.jobs || [])
       setSchedulerRunning(jobsRes.data.is_running || false)
-      setSources(sourcesRes.data.sources || [])
+      setEnvConfig(envRes.data)
     } catch (error) {
       console.error('Failed to fetch settings:', error)
     } finally {
@@ -56,6 +92,21 @@ export default function Settings() {
       setSchedulerRunning(!schedulerRunning)
     } catch (error) {
       console.error('Failed to toggle scheduler:', error)
+    }
+  }
+
+  async function saveEnvConfig() {
+    try {
+      setSaving(true)
+      const res = await settingsApi.updateEnv(envConfig)
+      alert(res.data.message || '配置已保存')
+      setEditMode(false)
+      fetchSettings()
+    } catch (error) {
+      console.error('Failed to save config:', error)
+      alert('保存失败')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -82,7 +133,7 @@ export default function Settings() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatusItem
             label="应用名称"
-            value={systemStatus?.app_name || '-'}
+            value={systemStatus?.app_name || 'Metis'}
           />
           <StatusItem
             label="版本"
@@ -90,17 +141,109 @@ export default function Settings() {
           />
           <StatusItem
             label="数据库"
-            value={systemStatus?.database_connected ? '已连接' : '未连接'}
-            status={systemStatus?.database_connected ? 'success' : 'error'}
+            value={systemStatus?.database?.connected 
+              ? `${systemStatus.database.type} (${systemStatus.database.url_display})` 
+              : '未连接'}
+            status={systemStatus?.database?.connected ? 'success' : 'error'}
             icon={<Database className="w-4 h-4" />}
           />
           <StatusItem
             label="LLM配置"
-            value={systemStatus?.llm_configured ? '已配置' : '未配置'}
-            status={systemStatus?.llm_configured ? 'success' : 'error'}
+            value={systemStatus?.llm?.configured 
+              ? `${systemStatus.llm.provider} (${systemStatus.llm.model})` 
+              : '未配置'}
+            status={systemStatus?.llm?.configured ? 'success' : 'error'}
             icon={<Key className="w-4 h-4" />}
           />
         </div>
+      </Card>
+
+      {/* LLM配置 */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <SettingsIcon className="w-5 h-5" />
+            LLM 配置
+          </h2>
+          <div className="flex gap-2">
+            {editMode ? (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setEditMode(false)}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="primary"
+                  icon={<Save className="w-4 h-4" />}
+                  onClick={saveEnvConfig}
+                  loading={saving}
+                >
+                  保存配置
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => setEditMode(true)}
+              >
+                编辑配置
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <ConfigRow
+            label="API Key"
+            value={envConfig.openai_api_key || '未设置'}
+            editMode={editMode}
+            type="password"
+            onChange={(v) => setEnvConfig({ ...envConfig, openai_api_key: v })}
+          />
+          <ConfigRow
+            label="API Base URL"
+            value={envConfig.openai_api_base}
+            editMode={editMode}
+            onChange={(v) => setEnvConfig({ ...envConfig, openai_api_base: v })}
+          />
+          <ConfigRow
+            label="模型名称"
+            value={envConfig.model_name}
+            editMode={editMode}
+            onChange={(v) => setEnvConfig({ ...envConfig, model_name: v })}
+          />
+          <ConfigRow
+            label="Temperature"
+            value={String(envConfig.model_temperature)}
+            editMode={editMode}
+            type="number"
+            onChange={(v) => setEnvConfig({ ...envConfig, model_temperature: parseFloat(v) || 0.2 })}
+          />
+          <ConfigRow
+            label="及格分数"
+            value={String(envConfig.passing_score)}
+            editMode={editMode}
+            type="number"
+            onChange={(v) => setEnvConfig({ ...envConfig, passing_score: parseInt(v) || 60 })}
+          />
+          <ConfigRow
+            label="采集间隔 (小时)"
+            value={String(envConfig.collect_interval_hours)}
+            editMode={editMode}
+            type="number"
+            onChange={(v) => setEnvConfig({ ...envConfig, collect_interval_hours: parseInt(v) || 6 })}
+          />
+        </div>
+
+        {editMode && (
+          <div className="mt-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              保存配置后需要重启后端服务才能生效
+            </p>
+          </div>
+        )}
       </Card>
 
       {/* 调度器 */}
@@ -130,103 +273,17 @@ export default function Settings() {
           </span>
         </div>
 
-        {jobs.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              已调度任务
-            </h3>
-            {jobs.map((job) => (
-              <div
-                key={job.id}
-                className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-slate-900 dark:text-slate-100">
-                    {job.name}
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    {job.trigger}
-                  </span>
-                </div>
-                {job.next_run_time && (
-                  <p className="text-sm text-slate-500 mt-1">
-                    下次执行: {new Date(job.next_run_time).toLocaleString('zh-CN')}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* 数据源 */}
-      <Card>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
-          数据源配置
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {sources.map((source) => (
-            <div
-              key={source.name}
-              className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-slate-900 dark:text-slate-100">
-                  {source.description}
-                </span>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-xs ${
-                    source.type === 'academic'
-                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                      : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                  }`}
-                >
-                  {source.type === 'academic' ? '学术' : '新闻'}
-                </span>
-              </div>
-              <p className="text-sm text-slate-500">{source.name}</p>
-              {source.categories && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {source.categories.map((cat: string) => (
-                    <span
-                      key={cat}
-                      className="px-1.5 py-0.5 rounded text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400"
-                    >
-                      {cat}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* 快捷操作 */}
-      <Card>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
-          快捷操作
-        </h2>
-        <div className="flex flex-wrap gap-3">
-          <Button
-            variant="outline"
-            icon={<RefreshCw className="w-4 h-4" />}
-            onClick={() => collectApi.trigger()}
-          >
-            手动采集
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => systemApi.runPipeline({ limit: 10 })}
-          >
-            运行流水线
-          </Button>
-          <Button
-            variant="outline"
-            onClick={fetchSettings}
-          >
-            刷新状态
-          </Button>
+        {/* 调度器说明 */}
+        <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 text-sm text-slate-600 dark:text-slate-400">
+          <p className="mb-2">
+            <strong>功能说明：</strong>定时任务调度器用于自动执行周期性的知识采集任务。
+          </p>
+          <p className="mb-2">
+            <strong>工作流程：</strong>每隔 {envConfig.collect_interval_hours} 小时自动执行一次采集→预审→分析的完整流水线，持续更新知识库。
+          </p>
+          <p>
+            <strong>当前配置：</strong>采集间隔 {envConfig.collect_interval_hours} 小时，每次最多采集 {systemStatus?.max_items_per_run || 50} 条内容，预审及格线 {envConfig.passing_score} 分。
+          </p>
         </div>
       </Card>
 
@@ -239,10 +296,12 @@ export default function Settings() {
               配置说明
             </h3>
             <ul className="text-sm text-amber-700 dark:text-amber-300 space-y-1">
-              <li>• API Key 配置: 在后端 .env 文件中设置 OPENAI_API_KEY</li>
-              <li>• 采集间隔: 默认每 6 小时自动采集一次</li>
-              <li>• 评分阈值: 默认 60 分及格，可在后端配置</li>
-              <li>• 数据存储: SQLite 数据库，位于 data/metis.db</li>
+              <li>• <strong>API Key</strong>：OpenAI 或兼容 API 的密钥，必填</li>
+              <li>• <strong>API Base URL</strong>：API 端点地址，默认为 OpenAI 官方地址</li>
+              <li>• <strong>模型名称</strong>：使用的 LLM 模型，推荐 gpt-4 或 gpt-3.5-turbo</li>
+              <li>• <strong>Temperature</strong>：生成温度，值越低输出越稳定，推荐 0.2</li>
+              <li>• <strong>及格分数</strong>：预审通过阈值，低于此分数的内容将被拒绝</li>
+              <li>• <strong>采集间隔</strong>：自动采集的时间间隔（小时）</li>
             </ul>
           </div>
         </div>
@@ -279,6 +338,40 @@ function StatusItem({
       >
         {value}
       </p>
+    </div>
+  )
+}
+
+function ConfigRow({
+  label,
+  value,
+  editMode,
+  type = 'text',
+  onChange,
+}: {
+  label: string
+  value: string
+  editMode: boolean
+  type?: 'text' | 'password' | 'number'
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex items-center gap-4">
+      <label className="w-32 text-sm font-medium text-slate-700 dark:text-slate-300 flex-shrink-0">
+        {label}
+      </label>
+      {editMode ? (
+        <input
+          type={type === 'password' ? 'password' : type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+        />
+      ) : (
+        <span className="flex-1 text-sm text-slate-600 dark:text-slate-400">
+          {type === 'password' && value ? '••••••••' : value}
+        </span>
+      )}
     </div>
   )
 }

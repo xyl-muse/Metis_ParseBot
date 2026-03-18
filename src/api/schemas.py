@@ -147,6 +147,7 @@ class LearningRecordResponse(BaseModel):
     learning_suggestions: Optional[str] = None
     is_read: bool = False
     is_bookmarked: bool = False
+    user_notes: Optional[str] = None
     created_at: datetime
 
     class Config:
