@@ -1,7 +1,8 @@
 {
   "name": "metis-parsebot-frontend",
-  "private": true,
   "version": "0.1.0",
+  "author": "muse&iflow",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",

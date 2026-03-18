@@ -85,7 +85,7 @@ export default function Layout() {
           <div className="p-4 border-t border-slate-200/50 dark:border-slate-700/50">
             <div className="px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-800">
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Powered by AI
+                muse&iflow
               </p>
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
                 v0.1.0
